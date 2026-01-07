@@ -24,16 +24,21 @@ def main() -> None:
 
     conn = connect_sqlite(settings.offline_dict_db_path)
     try:
+        needs_build_flag = None
         try:
             if settings.offline_dict_dir_path:
-                print(
-                    "Needs build:",
-                    needs_build(conn, dir_path=settings.offline_dict_dir_path),
+                needs_build_flag = needs_build(
+                    conn, dir_path=settings.offline_dict_dir_path
                 )
             else:
-                print("Needs build:", needs_build(conn, settings.offline_dict_zip_path))
+                needs_build_flag = needs_build(conn, settings.offline_dict_zip_path)
         except BuildError as exc:
             print("Needs build: error:", exc)
+        else:
+            print("Needs build:", needs_build_flag)
+        if needs_build_flag:
+            print("Cache not built yet. Run build first (or start server once).")
+            return
         counts = {}
         for table in ["entries", "senses", "equivalents"]:
             try:
