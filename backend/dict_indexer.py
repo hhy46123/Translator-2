@@ -66,13 +66,23 @@ def _iter_lexical_entries(payload: object) -> Iterable[dict]:
     for lex in lexicons:
         if not isinstance(lex, dict):
             continue
-        lexical_entry = lex.get("LexicalEntry")
+        lexical_entry = lex.get("LexicalEntry") or lex.get("lexical_entries")
         if isinstance(lexical_entry, list):
             entries = lexical_entry
         elif isinstance(lexical_entry, dict):
             entries = [lexical_entry]
         else:
             entries = []
+        if not entries:
+            for value in lex.values():
+                if (
+                    isinstance(value, list)
+                    and value
+                    and all(isinstance(item, dict) for item in value)
+                    and any("feat" in item or "Feat" in item for item in value)
+                ):
+                    entries = value
+                    break
         for entry in entries:
             if isinstance(entry, dict):
                 yield entry
@@ -143,7 +153,7 @@ def _parse_feat_entry(entry: dict) -> tuple[list[str], list[str], str | None]:
     feats = entry.get("feat") or entry.get("Feat") or []
     if not isinstance(feats, list):
         return [], [], None
-    headword_val = None
+    headwords: list[str] = []
     definitions: list[str] = []
     language = None
     for feat in feats:
@@ -153,25 +163,38 @@ def _parse_feat_entry(entry: dict) -> tuple[list[str], list[str], str | None]:
         val = feat.get("val") or feat.get("Val")
         if not isinstance(att, str):
             continue
-        if att == "lemma" and isinstance(val, str) and headword_val is None:
-            headword_val = val
-        elif att == "definition" and isinstance(val, str):
-            definitions.append(val)
-        elif att == "language" and isinstance(val, str):
-            language = val
-    if not headword_val:
-        return [], [], language
-    headwords = [part.strip() for part in headword_val.split(",")]
+        att_norm = att.strip().lower()
+        if att_norm == "lemma" and isinstance(val, str):
+            headwords.extend([part.strip() for part in val.split(",") if part.strip()])
+        elif att_norm == "definition" and isinstance(val, str):
+            definitions.append(val.strip())
+        elif att_norm == "language" and isinstance(val, str) and language is None:
+            language = val.strip()
     headwords = [hw for hw in headwords if hw]
-    definitions = [definition.strip() for definition in definitions if definition.strip()]
+    definitions = [definition for definition in definitions if definition]
     return headwords, definitions, language
+
+
+def _has_hangul(text: str) -> bool:
+    return any("\uac00" <= ch <= "\ud7a3" for ch in text)
 
 
 def _is_korean_language(language: str | None) -> bool:
     if not language:
         return True
     normalized = language.strip().lower()
-    return any(token in normalized for token in ("ko", "kor", "korean", "한국"))
+    if any(token in normalized for token in ("ko", "kor", "korean", "한국")):
+        return True
+    return _has_hangul(normalized)
+
+
+def _is_confident_non_korean(language: str | None) -> bool:
+    if not language:
+        return False
+    normalized = language.strip().lower()
+    if _has_hangul(normalized):
+        return False
+    return any(token in normalized for token in ("en", "eng", "english"))
 
 
 def _load_json_from_zip(zip_path: Path, name: str) -> object:
@@ -358,10 +381,17 @@ def build_dictionary_from_dir(
                 entries_processed += 1
                 headwords, definitions, language = _parse_feat_entry(entry)
                 if headwords:
-                    if language and not _is_korean_language(language) and not include_non_ko:
+                    if not include_non_ko and _is_confident_non_korean(language):
                         continue
                     if not definitions:
                         continue
+                    if entries_processed <= 3:
+                        print(
+                            "Entry sample:",
+                            f"language={language!r}",
+                            f"headwords={len(headwords)}",
+                            f"definitions={len(definitions)}",
+                        )
                     for headword in headwords:
                         senses = [
                             {"sense_no": None, "definition": definition, "equivs": []}
@@ -396,6 +426,13 @@ def build_dictionary_from_dir(
                     )
                 if not senses:
                     continue
+                if entries_processed <= 3:
+                    print(
+                        "Entry sample:",
+                        f"language={language!r}",
+                        "headwords=1",
+                        f"definitions={len(senses)}",
+                    )
                 headwords_inserted += 1
                 senses_inserted += len(senses)
                 batch.append({"headword": headword, "senses": senses})
