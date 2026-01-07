@@ -187,6 +187,10 @@ def _has_hangul(text: str) -> bool:
     return any("\uac00" <= ch <= "\ud7a3" for ch in text)
 
 
+def _has_hangul_in_headwords(headwords: list[str]) -> bool:
+    return any(_has_hangul(word) for word in headwords)
+
+
 def _is_korean_language(language: str | None) -> bool:
     if not language:
         return True
@@ -389,6 +393,8 @@ def build_dictionary_from_dir(
                 entries_processed += 1
                 headwords, definitions, language = _parse_feat_entry(entry)
                 if headwords:
+                    if not include_non_ko and not _has_hangul_in_headwords(headwords):
+                        continue
                     if not definitions:
                         continue
                     if entries_processed <= 3:
