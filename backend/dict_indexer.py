@@ -154,19 +154,19 @@ def _parse_feat_entry(entry: dict) -> tuple[list[str], list[str], str | None]:
         if isinstance(node, dict):
             if "att" in node and "val" in node:
                 yield node
-            for value in node.values():
-                yield from walk(value)
+            for v in node.values():
+                yield from walk(v)
         elif isinstance(node, list):
-            for item in node:
-                yield from walk(item)
+            for x in node:
+                yield from walk(x)
 
     headwords: list[str] = []
     definitions: list[str] = []
     language = None
 
-    for feat in walk(entry):
-        att = (feat.get("att") or "").lower()
-        val = (feat.get("val") or "").strip()
+    for f in walk(entry):
+        att = (f.get("att") or "").lower()
+        val = (f.get("val") or "").strip()
         if not val:
             continue
 
@@ -389,8 +389,6 @@ def build_dictionary_from_dir(
                 entries_processed += 1
                 headwords, definitions, language = _parse_feat_entry(entry)
                 if headwords:
-                    if not include_non_ko and _is_confident_non_korean(language):
-                        continue
                     if not definitions:
                         continue
                     if entries_processed <= 3:
