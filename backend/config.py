@@ -11,6 +11,7 @@ class Settings:
     data_dir: Path
     cache_dir: Path
     offline_dict_dir_path: Path | None
+    offline_dict_include_non_ko: bool
     offline_dict_zip_path: Path
     offline_dict_db_path: Path
     notebook_db_path: Path
@@ -24,6 +25,12 @@ def load_settings() -> Settings:
     cache_dir = data_dir / "cache"
     offline_dir_env = os.environ.get("OFFLINE_DICT_DIR_PATH")
     offline_dir = Path(offline_dir_env) if offline_dir_env else None
+    include_non_ko = os.environ.get("OFFLINE_DICT_INCLUDE_NON_KO", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
     offline_dict_zip = Path(
         os.environ.get("OFFLINE_DICT_ZIP_PATH", data_dir / "offline_dict.zip")
     )
@@ -35,6 +42,7 @@ def load_settings() -> Settings:
         data_dir=data_dir,
         cache_dir=cache_dir,
         offline_dict_dir_path=offline_dir,
+        offline_dict_include_non_ko=include_non_ko,
         offline_dict_zip_path=offline_dict_zip,
         offline_dict_db_path=offline_dict_db,
         notebook_db_path=notebook_db,

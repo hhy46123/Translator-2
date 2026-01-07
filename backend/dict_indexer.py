@@ -139,6 +139,41 @@ def _extract_equivalents(sense: dict) -> list[str]:
     return items
 
 
+def _parse_feat_entry(entry: dict) -> tuple[list[str], list[str], str | None]:
+    feats = entry.get("feat") or entry.get("Feat") or []
+    if not isinstance(feats, list):
+        return [], [], None
+    headword_val = None
+    definitions: list[str] = []
+    language = None
+    for feat in feats:
+        if not isinstance(feat, dict):
+            continue
+        att = feat.get("att") or feat.get("Att")
+        val = feat.get("val") or feat.get("Val")
+        if not isinstance(att, str):
+            continue
+        if att == "lemma" and isinstance(val, str) and headword_val is None:
+            headword_val = val
+        elif att == "definition" and isinstance(val, str):
+            definitions.append(val)
+        elif att == "language" and isinstance(val, str):
+            language = val
+    if not headword_val:
+        return [], [], language
+    headwords = [part.strip() for part in headword_val.split(",")]
+    headwords = [hw for hw in headwords if hw]
+    definitions = [definition.strip() for definition in definitions if definition.strip()]
+    return headwords, definitions, language
+
+
+def _is_korean_language(language: str | None) -> bool:
+    if not language:
+        return True
+    normalized = language.strip().lower()
+    return any(token in normalized for token in ("ko", "kor", "korean", "한국"))
+
+
 def _load_json_from_zip(zip_path: Path, name: str) -> object:
     with zipfile.ZipFile(zip_path, "r") as zf:
         with zf.open(name) as handle:
@@ -295,7 +330,9 @@ def build_dictionary_from_zip(zip_path: Path, db_path: Path) -> None:
     conn.close()
 
 
-def build_dictionary_from_dir(dir_path: Path, db_path: Path) -> None:
+def build_dictionary_from_dir(
+    dir_path: Path, db_path: Path, include_non_ko: bool = False
+) -> None:
     conn = connect_sqlite(db_path)
     configure_build_pragmas(conn)
     conn.executescript(SCHEMA)
@@ -309,6 +346,7 @@ def build_dictionary_from_dir(dir_path: Path, db_path: Path) -> None:
         raise BuildError(f"No JSON files found in directory: {dir_path}")
 
     entries_processed = 0
+    headwords_inserted = 0
     senses_inserted = 0
     for path in json_paths:
         try:
@@ -317,14 +355,36 @@ def build_dictionary_from_dir(dir_path: Path, db_path: Path) -> None:
             continue
         for entry in _iter_lexical_entries(payload):
             try:
+                entries_processed += 1
+                headwords, definitions, language = _parse_feat_entry(entry)
+                if headwords:
+                    if language and not _is_korean_language(language) and not include_non_ko:
+                        continue
+                    if not definitions:
+                        continue
+                    for headword in headwords:
+                        senses = [
+                            {"sense_no": None, "definition": definition, "equivs": []}
+                            for definition in definitions
+                        ]
+                        if not senses:
+                            continue
+                        headwords_inserted += 1
+                        senses_inserted += len(senses)
+                        batch.append({"headword": headword, "senses": senses})
+                        if len(batch) >= 250:
+                            _flush_batch(conn, batch)
+                    continue
+
                 headword = _extract_headword(entry)
                 if not headword:
                     continue
-                entries_processed += 1
                 senses = []
                 for sense in _extract_senses(entry):
                     definition = _extract_definition(sense)
                     equivalents = _extract_equivalents(sense)
+                    if not definition and not equivalents:
+                        continue
                     senses.append(
                         {
                             "sense_no": str(sense.get("senseNumber"))
@@ -336,6 +396,7 @@ def build_dictionary_from_dir(dir_path: Path, db_path: Path) -> None:
                     )
                 if not senses:
                     continue
+                headwords_inserted += 1
                 senses_inserted += len(senses)
                 batch.append({"headword": headword, "senses": senses})
                 if len(batch) >= 250:
@@ -347,6 +408,7 @@ def build_dictionary_from_dir(dir_path: Path, db_path: Path) -> None:
     conn.commit()
     conn.close()
     print(f"Indexed LexicalEntry: {entries_processed}")
+    print(f"Headwords inserted: {headwords_inserted}")
     print(f"Senses inserted: {senses_inserted}")
 
 

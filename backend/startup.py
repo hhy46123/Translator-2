@@ -66,7 +66,9 @@ def ensure_offline_dict(settings: Settings) -> None:
     try:
         if use_dir:
             build_dictionary_from_dir(
-                settings.offline_dict_dir_path, settings.offline_dict_db_path
+                settings.offline_dict_dir_path,
+                settings.offline_dict_db_path,
+                include_non_ko=settings.offline_dict_include_non_ko,
             )
         else:
             build_dictionary_from_zip(
