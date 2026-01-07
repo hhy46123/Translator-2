@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Translate</h2>
+  <div class="form-row">
+    <label for="text">Text</label>
+    <input id="text" type="text" placeholder="Type English or Korean" />
+  </div>
+  <div class="form-row">
+    <label for="direction">Direction</label>
+    <select id="direction">
+      <option value="auto">Auto</option>
+      <option value="en">English → Korean</option>
+      <option value="ko">Korean → English</option>
+    </select>
+  </div>
+  <button id="translate-btn">Translate</button>
+</section>
+<section class="card">
+  <h2>Result</h2>
+  <pre id="translated"></pre>
+  <div id="status" class="muted"></div>
+  <button id="save-btn" disabled>Save to Notebook</button>
+</section>
+<script src="/static/translate.js"></script>
+{% endblock %}
