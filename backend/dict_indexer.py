@@ -150,17 +150,21 @@ def _extract_equivalents(sense: dict) -> list[str]:
 
 
 def _parse_feat_entry(entry: dict) -> tuple[list[str], list[str], str | None]:
-    feats = entry.get("feat") or entry.get("Feat") or []
+    def walk(node):
+        if isinstance(node, dict):
+            if "att" in node and "val" in node:
+                yield node
+            for value in node.values():
+                yield from walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                yield from walk(item)
+
     headwords: list[str] = []
     definitions: list[str] = []
     language = None
 
-    if not isinstance(feats, list):
-        return [], [], None
-
-    for feat in feats:
-        if not isinstance(feat, dict):
-            continue
+    for feat in walk(entry):
         att = (feat.get("att") or "").lower()
         val = (feat.get("val") or "").strip()
         if not val:
