@@ -197,6 +197,12 @@ def needs_build(
     zip_path: Path | None = None,
     dir_path: Path | None = None,
 ) -> bool:
+    try:
+        conn.execute("SELECT 1 FROM meta LIMIT 1").fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table: meta" in str(exc):
+            return True
+        raise
     if dir_path is not None:
         if not dir_path.exists():
             raise BuildError(f"Offline dictionary directory missing: {dir_path}")
