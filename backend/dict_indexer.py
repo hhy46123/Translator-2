@@ -79,11 +79,17 @@ def _iter_lexical_entries(payload: object) -> Iterable[dict]:
 
 
 def _extract_headword(entry: dict) -> str | None:
-    lemma = entry.get("Lemma")
-    if isinstance(lemma, dict):
-        headword = lemma.get("writtenForm") or lemma.get("WrittenForm")
-        if isinstance(headword, str) and headword.strip():
-            return headword.strip()
+    for lemma_key in ("Lemma", "lemma"):
+        lemma = entry.get(lemma_key)
+        if isinstance(lemma, dict):
+            headword = (
+                lemma.get("writtenForm")
+                or lemma.get("writtenform")
+                or lemma.get("WrittenForm")
+                or lemma.get("Writtenform")
+            )
+            if isinstance(headword, str) and headword.strip():
+                return headword.strip()
     headword = entry.get("headword")
     if isinstance(headword, str) and headword.strip():
         return headword.strip()
@@ -91,7 +97,7 @@ def _extract_headword(entry: dict) -> str | None:
 
 
 def _extract_senses(entry: dict) -> list[dict]:
-    senses = entry.get("Sense")
+    senses = entry.get("Sense") or entry.get("sense")
     if isinstance(senses, list):
         return [s for s in senses if isinstance(s, dict)]
     if isinstance(senses, dict):
@@ -100,11 +106,14 @@ def _extract_senses(entry: dict) -> list[dict]:
 
 
 def _extract_definition(sense: dict) -> str | None:
-    definition = sense.get("definition") or sense.get("Definition")
+    definition = sense.get("Definition") or sense.get("definition")
     if isinstance(definition, dict):
-        text = definition.get("writtenForm") or definition.get("WrittenForm")
+        text = definition.get("text") or definition.get("Text")
         if isinstance(text, str) and text.strip():
             return text.strip()
+    gloss = sense.get("gloss")
+    if isinstance(gloss, str) and gloss.strip():
+        return gloss.strip()
     if isinstance(definition, str) and definition.strip():
         return definition.strip()
     return None
@@ -299,6 +308,8 @@ def build_dictionary_from_dir(dir_path: Path, db_path: Path) -> None:
     if not json_paths:
         raise BuildError(f"No JSON files found in directory: {dir_path}")
 
+    entries_processed = 0
+    senses_inserted = 0
     for path in json_paths:
         try:
             payload = _load_json_from_file(path)
@@ -309,6 +320,7 @@ def build_dictionary_from_dir(dir_path: Path, db_path: Path) -> None:
                 headword = _extract_headword(entry)
                 if not headword:
                     continue
+                entries_processed += 1
                 senses = []
                 for sense in _extract_senses(entry):
                     definition = _extract_definition(sense)
@@ -322,9 +334,9 @@ def build_dictionary_from_dir(dir_path: Path, db_path: Path) -> None:
                             "equivs": equivalents,
                         }
                     )
-                senses = [s for s in senses if s["definition"] or s["equivs"]]
                 if not senses:
                     continue
+                senses_inserted += len(senses)
                 batch.append({"headword": headword, "senses": senses})
                 if len(batch) >= 250:
                     _flush_batch(conn, batch)
@@ -334,6 +346,8 @@ def build_dictionary_from_dir(dir_path: Path, db_path: Path) -> None:
     _update_meta_dir(conn, json_paths)
     conn.commit()
     conn.close()
+    print(f"Indexed LexicalEntry: {entries_processed}")
+    print(f"Senses inserted: {senses_inserted}")
 
 
 def has_dictionary_data(conn: sqlite3.Connection) -> bool:
