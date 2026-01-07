@@ -151,27 +151,31 @@ def _extract_equivalents(sense: dict) -> list[str]:
 
 def _parse_feat_entry(entry: dict) -> tuple[list[str], list[str], str | None]:
     feats = entry.get("feat") or entry.get("Feat") or []
-    if not isinstance(feats, list):
-        return [], [], None
     headwords: list[str] = []
     definitions: list[str] = []
     language = None
+
+    if not isinstance(feats, list):
+        return [], [], None
+
     for feat in feats:
         if not isinstance(feat, dict):
             continue
-        att = feat.get("att") or feat.get("Att")
-        val = feat.get("val") or feat.get("Val")
-        if not isinstance(att, str):
+        att = (feat.get("att") or "").lower()
+        val = (feat.get("val") or "").strip()
+        if not val:
             continue
-        att_norm = att.strip().lower()
-        if att_norm == "lemma" and isinstance(val, str):
-            headwords.extend([part.strip() for part in val.split(",") if part.strip()])
-        elif att_norm == "definition" and isinstance(val, str):
-            definitions.append(val.strip())
-        elif att_norm == "language" and isinstance(val, str) and language is None:
-            language = val.strip()
-    headwords = [hw for hw in headwords if hw]
-    definitions = [definition for definition in definitions if definition]
+
+        if att == "language":
+            language = val
+        elif att == "lemma":
+            for headword in val.split(","):
+                headword = headword.strip()
+                if headword:
+                    headwords.append(headword)
+        elif att == "definition":
+            definitions.append(val)
+
     return headwords, definitions, language
 
 
@@ -194,7 +198,7 @@ def _is_confident_non_korean(language: str | None) -> bool:
     normalized = language.strip().lower()
     if _has_hangul(normalized):
         return False
-    return any(token in normalized for token in ("en", "eng", "english"))
+    return "english" in normalized
 
 
 def _load_json_from_zip(zip_path: Path, name: str) -> object:
