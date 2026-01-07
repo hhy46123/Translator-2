@@ -141,7 +141,24 @@ def _json_names(zip_path: Path) -> list[str]:
         return [n for n in zf.namelist() if n.lower().endswith(".json")]
 
 
-def _update_meta(conn: sqlite3.Connection, zip_path: Path) -> None:
+def _json_paths(root_dir: Path) -> list[Path]:
+    return [path for path in root_dir.rglob("*.json") if path.is_file()]
+
+
+def _load_json_from_file(path: Path) -> object:
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _dir_stats(paths: list[Path]) -> tuple[str, str, str]:
+    if not paths:
+        return "0", "0", "0"
+    total_size = sum(path.stat().st_size for path in paths)
+    max_mtime = max(path.stat().st_mtime for path in paths)
+    return str(max_mtime), str(total_size), str(len(paths))
+
+
+def _update_meta_zip(conn: sqlite3.Connection, zip_path: Path) -> None:
     stat = zip_path.stat()
     conn.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
@@ -153,14 +170,57 @@ def _update_meta(conn: sqlite3.Connection, zip_path: Path) -> None:
     )
 
 
+def _update_meta_dir(conn: sqlite3.Connection, paths: list[Path]) -> None:
+    mtime, total_size, file_count = _dir_stats(paths)
+    conn.execute(
+        "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+        ("dir_mtime", mtime),
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+        ("dir_size", total_size),
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+        ("dir_file_count", file_count),
+    )
+
+
 def _read_meta(conn: sqlite3.Connection) -> tuple[str | None, str | None]:
     cur = conn.execute("SELECT key, value FROM meta")
     data = {row["key"]: row["value"] for row in cur.fetchall()}
     return data.get("zip_mtime"), data.get("zip_size")
 
 
-def needs_build(conn: sqlite3.Connection, zip_path: Path) -> bool:
-    if not zip_path.exists():
+def needs_build(
+    conn: sqlite3.Connection,
+    zip_path: Path | None = None,
+    dir_path: Path | None = None,
+) -> bool:
+    if dir_path is not None:
+        if not dir_path.exists():
+            raise BuildError(f"Offline dictionary directory missing: {dir_path}")
+        paths = _json_paths(dir_path)
+        stored_mtime_row = conn.execute(
+            "SELECT value FROM meta WHERE key = ?", ("dir_mtime",)
+        ).fetchone()
+        stored_size_row = conn.execute(
+            "SELECT value FROM meta WHERE key = ?", ("dir_size",)
+        ).fetchone()
+        stored_count = conn.execute(
+            "SELECT value FROM meta WHERE key = ?", ("dir_file_count",)
+        ).fetchone()
+        current_mtime, current_size, current_count = _dir_stats(paths)
+        stored_mtime = stored_mtime_row["value"] if stored_mtime_row else None
+        stored_size = stored_size_row["value"] if stored_size_row else None
+        if stored_count is None:
+            return True
+        return (
+            stored_mtime != current_mtime
+            or stored_size != current_size
+            or stored_count["value"] != current_count
+        )
+    if zip_path is None or not zip_path.exists():
         raise BuildError(f"Offline dictionary ZIP missing: {zip_path}")
     stored_mtime, stored_size = _read_meta(conn)
     stat = zip_path.stat()
@@ -169,7 +229,7 @@ def needs_build(conn: sqlite3.Connection, zip_path: Path) -> bool:
     return stored_mtime != current_mtime or stored_size != current_size
 
 
-def build_dictionary(zip_path: Path, db_path: Path) -> None:
+def build_dictionary_from_zip(zip_path: Path, db_path: Path) -> None:
     conn = connect_sqlite(db_path)
     configure_build_pragmas(conn)
     conn.executescript(SCHEMA)
@@ -215,9 +275,67 @@ def build_dictionary(zip_path: Path, db_path: Path) -> None:
             except Exception:
                 continue
     _flush_batch(conn, batch)
-    _update_meta(conn, zip_path)
+    _update_meta_zip(conn, zip_path)
     conn.commit()
     conn.close()
+
+
+def build_dictionary_from_dir(dir_path: Path, db_path: Path) -> None:
+    conn = connect_sqlite(db_path)
+    configure_build_pragmas(conn)
+    conn.executescript(SCHEMA)
+    conn.execute("DELETE FROM entries")
+    conn.execute("DELETE FROM senses")
+    conn.execute("DELETE FROM equivalents")
+
+    batch: list[dict] = []
+    json_paths = _json_paths(dir_path)
+    if not json_paths:
+        raise BuildError(f"No JSON files found in directory: {dir_path}")
+
+    for path in json_paths:
+        try:
+            payload = _load_json_from_file(path)
+        except (json.JSONDecodeError, OSError):
+            continue
+        for entry in _iter_lexical_entries(payload):
+            try:
+                headword = _extract_headword(entry)
+                if not headword:
+                    continue
+                senses = []
+                for sense in _extract_senses(entry):
+                    definition = _extract_definition(sense)
+                    equivalents = _extract_equivalents(sense)
+                    senses.append(
+                        {
+                            "sense_no": str(sense.get("senseNumber"))
+                            if sense.get("senseNumber")
+                            else None,
+                            "definition": definition,
+                            "equivs": equivalents,
+                        }
+                    )
+                senses = [s for s in senses if s["definition"] or s["equivs"]]
+                if not senses:
+                    continue
+                batch.append({"headword": headword, "senses": senses})
+                if len(batch) >= 250:
+                    _flush_batch(conn, batch)
+            except Exception:
+                continue
+    _flush_batch(conn, batch)
+    _update_meta_dir(conn, json_paths)
+    conn.commit()
+    conn.close()
+
+
+def has_dictionary_data(conn: sqlite3.Connection) -> bool:
+    try:
+        row = conn.execute("SELECT COUNT(*) AS count FROM entries").fetchone()
+        return bool(row["count"])
+    except sqlite3.Error:
+        return False
 
 
 def _flush_batch(conn: sqlite3.Connection, batch: list[dict]) -> None:

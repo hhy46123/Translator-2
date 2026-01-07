@@ -6,7 +6,12 @@ from pathlib import Path
 
 from .config import Settings
 from .db import connect_sqlite
-from .dict_indexer import build_dictionary, needs_build
+from .dict_indexer import (
+    build_dictionary_from_dir,
+    build_dictionary_from_zip,
+    has_dictionary_data,
+    needs_build,
+)
 from .notebook import init_notebook
 
 
@@ -46,14 +51,27 @@ def ensure_offline_dict(settings: Settings) -> None:
         """
     )
     conn.commit()
-    if not needs_build(conn, settings.offline_dict_zip_path):
+    use_dir = settings.offline_dict_dir_path is not None
+    if use_dir:
+        needs_rebuild = needs_build(conn, dir_path=settings.offline_dict_dir_path)
+    else:
+        needs_rebuild = needs_build(conn, zip_path=settings.offline_dict_zip_path)
+
+    if not needs_rebuild and has_dictionary_data(conn):
         conn.close()
         return
     conn.close()
 
     acquire_lock(settings.build_lock_path)
     try:
-        build_dictionary(settings.offline_dict_zip_path, settings.offline_dict_db_path)
+        if use_dir:
+            build_dictionary_from_dir(
+                settings.offline_dict_dir_path, settings.offline_dict_db_path
+            )
+        else:
+            build_dictionary_from_zip(
+                settings.offline_dict_zip_path, settings.offline_dict_db_path
+            )
     finally:
         release_lock(settings.build_lock_path)
 

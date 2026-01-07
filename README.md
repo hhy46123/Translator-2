@@ -3,7 +3,7 @@
 Production-safe, 100% offline English↔Korean translation and learning notebook.
 
 ## Features
-- **Offline only**: uses a local ZIP of Korean Basic Dictionary JSON files.
+- **Offline only**: uses a local directory of Korean Basic Dictionary JSON files.
 - **FastAPI + SQLite** backend with WAL for Windows safety.
 - **Server-rendered HTML** (Jinja2) + vanilla JS.
 - **Sense-level indexing** with multiple meanings per term.
@@ -49,8 +49,8 @@ python -m venv .venv
 # 2) Install dependencies
 pip install -r requirements.txt
 
-# 3) Set offline dictionary ZIP (required)
-$env:OFFLINE_DICT_ZIP_PATH = "C:\path\to\offline_dict.zip"
+# 3) Set offline dictionary directory (required)
+$env:OFFLINE_DICT_DIR_PATH = "C:\path\to\offline_dict"
 
 # 4) Run (stable)
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
@@ -60,15 +60,33 @@ python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 Use the same command as stable run. Do **not** use `--reload` in production.
 
 ## Offline Dictionary
-- Provide a local ZIP containing Korean Basic Dictionary JSON files.
-- The app builds the index **only at startup** and only if the ZIP changed.
+- Provide a local directory containing Korean Basic Dictionary JSON files.
+- Set `OFFLINE_DICT_DIR_PATH` to the directory (preferred). When set, ZIP is ignored.
+- The app builds the index **only at startup** and only if the directory contents changed.
 - Build lock: `data/cache/offline_build.lock` prevents multiple Windows processes building.
 
 ## CLI Diagnostic Tool
 ```powershell
 python -m backend.tools.diag
 ```
-Shows ZIP path, build status, and table counts.
+Shows dictionary source path, build status, and table counts.
+
+## Windows PowerShell Test Commands
+```powershell
+# Point to extracted dictionary directory
+$env:OFFLINE_DICT_DIR_PATH = "C:\Users\USER\Desktop\Translator-Offline\Translator-2\data\offline_dict"
+
+# Run diagnostics (should show counts > 0)
+python -m backend.tools.diag
+
+# Start server
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+
+# Example queries (from the UI):
+# - 초대
+# - 사람
+# - 가장자리
+```
 
 ## Reset Database
 ```powershell
